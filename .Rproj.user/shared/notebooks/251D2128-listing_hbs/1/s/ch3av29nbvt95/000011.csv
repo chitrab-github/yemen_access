@@ -1,0 +1,9 @@
+"0","set_credentials("
+"0","  server = ""yemenhbs2025-demo"","
+"0","  workspace = ""yemenhbs_supv"","
+"0","  user = ""yemenhbs_api"","
+"0","  password = ""yemenHBS2025!"""
+"0",")"
+"2","Error in set_credentials(server = ""yemenhbs2025-demo"", workspace = ""yemenhbs_supv"",  : 
+  could not find function ""set_credentials""
+"

@@ -1,0 +1,6 @@
+"0","knitr::opts_chunk$set(echo = TRUE)"
+"0",""
+"0","# if needed, install `devtools` by uncommenting the immediately below"
+"0","# install.packages(""devtools"")"
+"0",""
+"0",""

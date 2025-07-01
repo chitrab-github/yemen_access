@@ -1,0 +1,27 @@
+{
+    "id": "2C7DAC8D",
+    "path": "~/GitHub/yemen_access/tt_yemen/replace_road_values_in_raster.R",
+    "project_path": "replace_road_values_in_raster.R",
+    "type": "r_source",
+    "hash": "2164572526",
+    "contents": "",
+    "dirty": false,
+    "created": 1751389618947.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "43,0",
+        "scrollLine": "20"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1751409994,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1751409994622,
+    "read_only": false,
+    "read_only_alternatives": []
+}
