@@ -1,32 +1,403 @@
 ---
-title: "listing_hbs_clean"
+title: "Survey Data Quality Checks – Listing Module"
 output: html_document
 date: "2025-06-24"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
+This R Markdown document connects to the Survey Solutions API, downloads the paradata for HBS Listing interviews, and runs basic quality checks. These checks include:
+
+1. Interview duration
+
+2. Presence and format of key responses (name, phone number, household size)
+
+3. GPS validation (to be implemented)
+
+4. Population cross-check (to be implemented)
+
+
+Installing and Loading Packages
 
 ```{r}
-install.packages("devtools")
-devtools::install_github("arthur-shaw/susoapi",force = TRUE)
+#install.packages("devtools")
+#devtools::install_github("michael-cw/SurveySolutionsAPIv2", build_vignettes = T)
+#install.packages("ggplot2")
+#install.packages("data.table")
+#install.packages("raster")
+#install.packages("sp")
+#install.packages("leaflet")
+#install.packages("rnaturalearth")
+#install.packages("rnaturalearthdata")
+#install.packages("sf")
+#install.packages("exactextractr")
+#install.packages("terra")
 
+#load packages
+library(SurveySolutionsAPIv2)
+library(ggplot2)
+library(data.table)
+library(sp)
+library(raster)
+library(leaflet)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(terra)
+library(exactextractr)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
 
+Connecting to Survey Solutions
+
+Before proceeding, make sure you've created an API username and
 ```{r}
-# set_credentials(
-#   server = "yemenhbs2025-demo",
-#   workspace = "yemenhbs_supv",
-#   user = "yemenhbs_api",
-#   password = "yemenHBS2025!"
-#)
+# Before setting key, make sure to generate a key in the server
+suso_clear_keys()
+suso_set_key("https://yemenhbs2025-demo.mysurvey.solutions", "yemenhbs_api", "yemenHBS2025!", "primary")
+suso_keys()
+#> $suso
+#> $suso$susoServer
+#> [1] "https://xxx.mysurvey.solutions"
+#> 
+#> $suso$susoUser
+#> [1] "xxxxxx"
+#> 
+#> $suso$susoPass
+#> [1] "xxxxxxx"
+#> 
+#> $suso$workspace
+#> [1] "test"
+#> 
+#> 
+#> attr(,"class")
+#> [1] "suso_api"
 
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+View Workspaces and Users
+
+```{r # Checking workspace}
+ws <- suso_getWorkspace()
+print(head(ws))
+
+sv <- suso_getSV(workspace = "primary")
+print(head(sv))
+
+```
+
+
+
+Get Questionnaire List 
+
+```{r # Checking questionnaire list in the workspace}
+questlist <- suso_getQuestDetails()
+print(questlist)
+
+```
+
+
+
+Interviewer Info
+
+```{r # Checking interviewer info}
+interview_data <- suso_getINT()
+print(interview_data)
+```
+
+
+
+Export Data
+
+```{r # Code for exporting paradata}
+
+#Export date = June 1 - July 8, 2025
+data <- suso_export(
+  server      = suso_get_api_key("susoServer"),
+  apiUser     = suso_get_api_key("susoUser"),
+  apiPass     = suso_get_api_key("susoPass"),
+  token       = NULL,
+  workspace   = suso_get_api_key("workspace"),
+  questID     = questlist[3, QuestionnaireId],
+  version     = 3,
+  from_date   = "2025-07-01",
+  from_time   = "00:00:00",
+  to_date     = "2025-07-08",
+  to_time     = "23:59:59",
+  workStatus  = c("All", "SupervisorAssigned", "InterviewerAssigned",
+                  "RejectedBySupervisor", "Completed", "ApprovedBySupervisor",
+                  "RejectedByHeadquarters", "ApprovedByHeadquarters"),
+  addTranslation        = FALSE,
+  translationLanguage   = NULL,
+  reloadTimeDiff        = 1,
+  inShinyApp            = FALSE,
+  verbose               = FALSE,
+  weight_file           = NULL,
+  process_mapquestions  = TRUE,
+  combineFiles          = FALSE
+)
+
+
+#Export paradata = June 1 - July 8, 2025
+
+paradata <- suso_export_paradata(
+  server = suso_get_api_key("susoServer"),
+  apiUser = suso_get_api_key("susoUser"),
+  apiPass = suso_get_api_key("susoPass"),
+  token = NULL,
+  workspace = suso_get_api_key("workspace"),
+  questID = questlist[3,QuestionnaireId],
+  version = 3,
+  from_date = "2025-07-01",
+  from_time = "00:00:00",
+  to_date = "2025-07-08",
+  to_time = "23:59:59",
+  workStatus = c("All", "SupervisorAssigned", "InterviewerAssigned",
+    "RejectedBySupervisor", "Completed", "ApprovedBySupervisor",
+    "RejectedByHeadquarters", "ApprovedByHeadquarters"),
+  reloadTimeDiff = 1,
+  inShinyApp = FALSE,
+  multiCore = NULL,
+  onlyActiveEvents = FALSE,
+  asList = FALSE,
+  allResponses = TRUE,
+  gpsVarName = NA,
+  verbose = FALSE,
+  showProgress = FALSE
+)
+
+
+
+
+# 1. Create separate datasets (main, roster 1 (dwelling), roster 2(household))
+main_dt <- rbindlist(
+  lapply(data$main, function(x) {
+    if (!inherits(x, "sf")) as.data.table(x) else NULL
+  }),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+dwelling_dt <- rbindlist(
+  lapply(data$R1, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+household_dt <- rbindlist(
+  lapply(data$R2, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+#2. Convert paradata in a single list
+paradata_dt <- rbindlist(paradata, use.names = TRUE,fill = TRUE)
+
+
+
+
+
+```
+
+
+
+Check 1: Average Duration of Survey
+
+This check ensures that each interview lasted a reasonable amount of time. We also flag surveys that took less than one minute.
+
+
+```{r #Checking duration of survey}
+# Calculate duration per interview
+duration <- paradata_dt[
+  !is.na(dateTime), 
+  .(
+    start_time = min(dateTime, na.rm = TRUE),
+    end_time   = max(dateTime, na.rm = TRUE)
+  ), 
+  by = interview__id
+][, duration_mins := as.numeric(difftime(end_time, start_time, units = "mins"))]
+
+# Compute average duration
+avg_duration <- mean(duration$duration_mins, na.rm = TRUE)
+
+# Print result
+cat("Average survey duration (in minutes):", round(avg_duration, 2), "minutes\n")
+
+
+#Create bar plot 
+ggplot(duration, aes(x = reorder(interview__id, duration_mins), y = duration_mins/60)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +  # Makes it horizontal for better readability
+  labs(
+    title = "Survey Duration by Interview",
+    x = "Interview ID",
+    y = "Duration (Hours)"
+  ) +
+  theme_minimal()
+
+
+# Create a flag if survey is less than 2 minute
+duration[, short_survey := duration_mins < 2]
+print(duration)
+
+```
+
+
+Check 2A: Non-missing values for Name/Surname of Head of Household
+
+```{r #Checking non-missing names}
+household_dt[ , name_missing := is.na(q13)]
+print(household_dt[ , .(interview__id, name_missing)])
+
+name_missing <-  household_dt[, .(interview__id, name_missing)]
+
+```
+
+
+
+Check 2B: Non-missing values for Phone Number
+
+```{r # Checking non-missing phone number}
+# Define valid consent responses
+valid_consent <- c("Yes, eligible household member present and agreed to participate")
+
+# Step 1: Create q18_valid — keep q18 only if consent is valid, else NA
+household_dt[ , q18_valid := fifelse(q14 %in% valid_consent, q18, NA_character_) ]
+
+# Step 2: Clean q18_valid — remove whitespace
+household_dt[ , q18_clean := gsub("\\s+", "", q18_valid) ]
+
+# Step 3: Convert to numeric (for later checks)
+household_dt[ , q18_num := suppressWarnings(as.numeric(q18_clean)) ]
+
+# Step 4: Function to check if phone is a repeated digit (e.g., "000", "777")
+is_repeated_digit <- function(x) {
+  nchar(x) > 0 & grepl("^([0-9])\\1+$", x)
+}
+
+# Step 5: Flag phone_missing if:
+# - consent given AND
+# - q18 is NA, empty, 0, or made of repeated digits
+household_dt[ , phone_missing := NA ]  # initialize
+
+household_dt[q14 %in% valid_consent, phone_missing := 
+  is.na(q18_num) |
+  q18_clean == "" |
+  is_repeated_digit(q18_clean)
+]
+
+phone_missing <- household_dt[, .(interview__id, phone_missing)]
+
+print(phone_missing)
+
+```
+
+
+Check 3: Non missing values for Household Size
+
+```{r # Checking non-missing household size}
+# Define valid consent responses
+valid_consent <- c("Yes, eligible household member present and agreed to participate")
+
+# Flag missing household size only for valid consent cases
+household_dt[ , hh_size_missing := NA ]  # initialize
+
+household_dt[q14 %in% valid_consent, hh_size_missing := is.na(q15)]
+
+hhsize_missing <-  household_dt[, .(interview__id, hh_size_missing)]
+
+print(hhsize_missing)
+
+```
+
+
+
+Check 4: Check the population count against WorldPop 
+
+```{r #Checking pop count}
+# Step 1. Load WorldPop Data
+worldpop_data <- raster("C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian's files - 150_icl_access_to_markets/yem_pop_2025_CN_100m_R2024B_v1.tif") # NOTE: Change the path below based on your local directory
+
+# Step 2. Load Enumeration Area Shapefiles
+shp_path <- "C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian's files - 150_icl_access_to_markets/shapefiles_hbs"
+
+# List and read all shapefiles
+shp_files <- list.files(shp_path, pattern = "\\.shp$", full.names = TRUE)
+shp_list <- lapply(shp_files, st_read)
+
+# Optionally, name each shapefile by filename (without extension)
+names(shp_list) <- tools::file_path_sans_ext(basename(shp_files))
+
+# Combine all shapefiles into a single sf object
+enum_area <- do.call(rbind, shp_list)
+
+
+# Step 3. Combine main dt and household dt
+combined_dt <- merge(main_dt, household_dt, by = c("interview__id","interview__key"), all = TRUE)
+
+# Step 4. Replace CID with GRIDID
+combined_dt[ , cover04 := as.character(cover04)]
+combined_dt[cover04 == "1028", cover04 := "seg_Lat15429Lon5504"]
+
+# Step 5. Aggregate total households per grid cell (cover04 = CID) and sub-cell (cover05 = label)
+pop_by_grid <- combined_dt[ , .(
+  survey_pop_quadrant    = sum(q15, na.rm = TRUE),
+  interview_ids = list(unique(interview__id))
+), by = .(CID = cover04, label = cover05)]
+
+# Remove non-digit characters from label and convert to character
+pop_by_grid[ , label := gsub("\\D+", "", label)]
+pop_by_grid[ , label := as.character(label)]
+
+
+# Step 6. Extract WorldPop Population by Enumeration Area
+enum_area <- st_as_sf(enum_area)  # restore sf class
+
+
+# Calculate WorldPop raster sum for each enumeration shape
+enum_area$worldpop_pop <- exact_extract(worldpop_data, enum_area, 'sum')
+
+# Convert to data.table
+setDT(enum_area)
+
+# Ensure label column is character in both for join
+enum_area[ , label := as.character(label)]
+
+
+# Step 7. Merge Survey Population with WorldPop Population
+
+# Left join: bring survey population into enum_area
+comparison_df <- pop_by_grid[enum_area, on = .(CID, label)]
+
+# View result
+print(comparison_df)
+```
+
+
+Export as Excel sheet
+NAs are present where there is no consent
+
+```{r #Exporting excel sheet}
+# Start with duration
+qc_summary <- duration[, .(interview__id, duration_mins, short_survey)]
+
+# Merge other checks
+qc_summary <- merge(qc_summary, name_missing, by = "interview__id", all = TRUE)
+qc_summary <- merge(qc_summary, phone_missing, by = "interview__id", all = TRUE, allow.cartesian = T)
+qc_summary <- merge(qc_summary, hhsize_missing, by = "interview__id", all = TRUE,allow.cartesian = T)
+
+# View summary
+print(qc_summary)
+
+#Export to your directory
+timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M")
+filename <- paste0("survey_qc_summary_", timestamp, ".csv")
+output_dir <- "C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian's files - 150_icl_access_to_markets/" #CHANGE TO SPECIFIC DIRECTORY IN YOUR COMPUTER
+fwrite(qc_summary, file.path(output_dir, filename))
+
+
+```

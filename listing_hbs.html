@@ -12,7 +12,7 @@
 
 <meta name="date" content="2025-06-24" />
 
-<title>listing_hbs_clean</title>
+<title>Survey Data Quality Checks – Listing Module</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -349,61 +349,846 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">listing_hbs_clean</h1>
+<h1 class="title toc-ignore">Survey Data Quality Checks – Listing
+Module</h1>
 <h4 class="date">2025-06-24</h4>
 
 </div>
 
 
-<pre class="r"><code>install.packages(&quot;devtools&quot;)</code></pre>
-<pre><code>## The following package(s) will be installed:
-## - devtools [2.4.5]
-## These packages will be installed into &quot;~/GitHub/yemen_access/renv/library/windows/R-4.4/x86_64-w64-mingw32&quot;.
+<p>This R Markdown document connects to the Survey Solutions API,
+downloads the paradata for HBS Listing interviews, and runs basic
+quality checks. These checks include:</p>
+<ol style="list-style-type: decimal">
+<li><p>Interview duration</p></li>
+<li><p>Presence and format of key responses (name, phone number,
+household size)</p></li>
+<li><p>GPS validation (to be implemented)</p></li>
+<li><p>Population cross-check (to be implemented)</p></li>
+</ol>
+<p>Installing and Loading Packages</p>
+<pre class="r"><code>#install.packages(&quot;devtools&quot;)
+#devtools::install_github(&quot;michael-cw/SurveySolutionsAPIv2&quot;, build_vignettes = T)
+#install.packages(&quot;ggplot2&quot;)
+#install.packages(&quot;data.table&quot;)
+#install.packages(&quot;raster&quot;)
+#install.packages(&quot;sp&quot;)
+#install.packages(&quot;leaflet&quot;)
+#install.packages(&quot;rnaturalearth&quot;)
+#install.packages(&quot;rnaturalearthdata&quot;)
+#install.packages(&quot;sf&quot;)
+#install.packages(&quot;exactextractr&quot;)
+#install.packages(&quot;terra&quot;)
+
+#load packages
+library(SurveySolutionsAPIv2)
+library(ggplot2)
+library(data.table)
+library(sp)
+library(raster)
+library(leaflet)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(terra)
+library(exactextractr)</code></pre>
+<p>Connecting to Survey Solutions</p>
+<p>Before proceeding, make sure you’ve created an API username and</p>
+<pre class="r"><code># Before setting key, make sure to generate a key in the server
+suso_clear_keys()
+suso_set_key(&quot;https://yemenhbs2025-demo.mysurvey.solutions&quot;, &quot;yemenhbs_api&quot;, &quot;yemenHBS2025!&quot;, &quot;primary&quot;)
+suso_keys()</code></pre>
+<pre><code>## $suso
+## $suso$susoServer
+## [1] &quot;https://yemenhbs2025-demo.mysurvey.solutions/&quot;
 ## 
-## # Installing packages --------------------------------------------------------
-## - Installing devtools ...                       OK [linked from cache]
-## Successfully installed 1 package in 21 milliseconds.</code></pre>
-<pre class="r"><code>devtools::install_github(&quot;arthur-shaw/susoapi&quot;,force = TRUE)</code></pre>
-<pre><code>## WARNING: Rtools is required to build R packages, but is not currently installed.
+## $suso$susoUser
+## [1] &quot;yemenhbs_api&quot;
 ## 
-## Please download and install Rtools 4.4 from https://cran.r-project.org/bin/windows/Rtools/.</code></pre>
-<pre><code>## Downloading GitHub repo arthur-shaw/susoapi@HEAD</code></pre>
-<pre><code>## Warning in untar2(tarfile, files, list, exdir, restore_times): skipping pax
-## global extended headers
-## Warning in untar2(tarfile, files, list, exdir, restore_times): skipping pax
-## global extended headers</code></pre>
+## $suso$susoPass
+## [1] &quot;yemenHBS2025!&quot;
+## 
+## $suso$workspace
+## [1] &quot;primary&quot;
+## 
+## 
+## attr(,&quot;class&quot;)
+## [1] &quot;suso_api&quot;</code></pre>
+<pre class="r"><code>#&gt; $suso
+#&gt; $suso$susoServer
+#&gt; [1] &quot;https://xxx.mysurvey.solutions&quot;
+#&gt; 
+#&gt; $suso$susoUser
+#&gt; [1] &quot;xxxxxx&quot;
+#&gt; 
+#&gt; $suso$susoPass
+#&gt; [1] &quot;xxxxxxx&quot;
+#&gt; 
+#&gt; $suso$workspace
+#&gt; [1] &quot;test&quot;
+#&gt; 
+#&gt; 
+#&gt; attr(,&quot;class&quot;)
+#&gt; [1] &quot;suso_api&quot;</code></pre>
+<p>View Workspaces and Users</p>
+<pre class="r"><code>ws &lt;- suso_getWorkspace()
+print(head(ws))</code></pre>
+<pre><code>##       Name       DisplayName DisabledAtUtc CreatedAtUtc
+##     &lt;char&gt;            &lt;char&gt;        &lt;lgcl&gt;       &lt;lgcl&gt;
+## 1: primary Default Workspace            NA           NA</code></pre>
+<pre class="r"><code>sv &lt;- suso_getSV(workspace = &quot;primary&quot;)
+print(head(sv))</code></pre>
+<pre><code>##    IsLocked            CreationDate         DeviceId
+##      &lt;lgcl&gt;                  &lt;POSc&gt;           &lt;char&gt;
+## 1:    FALSE 2025-06-10 18:11:38.641 a7e63f42ed408281
+##                                  UserId      UserName
+##                                  &lt;char&gt;        &lt;char&gt;
+## 1: 452530ec-cb13-4c83-bea6-da4a85e27acd yemenhbs_supv</code></pre>
+<p>Get Questionnaire List</p>
+<pre class="r"><code>questlist &lt;- suso_getQuestDetails()
+print(questlist)</code></pre>
+<pre><code>## Key: &lt;Variable, QuestionnaireId, Version, QuestionnaireIdentity, Title, defaultLanguageName&gt;
+##          Variable                      QuestionnaireId Version
+##            &lt;char&gt;                               &lt;char&gt;   &lt;int&gt;
+## 1:  YHBS_listing0 e3ad9552-542c-4176-ac56-3a1bf8ef7f85       1
+## 2:  YHBS_listing0 e3ad9552-542c-4176-ac56-3a1bf8ef7f85       2
+## 3:  YHBS_listing0 e3ad9552-542c-4176-ac56-3a1bf8ef7f85       3
+## 4: hbs_yemen_2025 17a9fa22-1ef6-46d2-8c30-426aa876f273       1
+## 5: hbs_yemen_2025 17a9fa22-1ef6-46d2-8c30-426aa876f273       2
+## 6: hbs_yemen_2025 17a9fa22-1ef6-46d2-8c30-426aa876f273       5
+##                 QuestionnaireIdentity                       Title
+##                                &lt;char&gt;                      &lt;char&gt;
+## 1: e3ad9552542c4176ac563a1bf8ef7f85$1        Yemen HBS Listing v0
+## 2: e3ad9552542c4176ac563a1bf8ef7f85$2        Yemen HBS Listing v0
+## 3: e3ad9552542c4176ac563a1bf8ef7f85$3        Yemen HBS Listing v0
+## 4: 17a9fa221ef646d28c30426aa876f273$1 Yemen HBS 2025-post mission
+## 5: 17a9fa221ef646d28c30426aa876f273$2 Yemen HBS 2025-post mission
+## 6: 17a9fa221ef646d28c30426aa876f273$5 Yemen HBS 2025-post mission
+##    defaultLanguageName        (arabic) Yemen HBS Listing v0
+##                 &lt;char&gt;                               &lt;char&gt;
+## 1:                &lt;NA&gt;                                 &lt;NA&gt;
+## 2:                &lt;NA&gt; 06af549c-3470-26ca-eba6-5886c6eb2fa1
+## 3:                &lt;NA&gt;                                 &lt;NA&gt;
+## 4:                &lt;NA&gt;                                 &lt;NA&gt;
+## 5:                &lt;NA&gt;                                 &lt;NA&gt;
+## 6:                                                     &lt;NA&gt;
+##                   Arabic Yemen HBS_suso
+##                                  &lt;char&gt;
+## 1:                                 &lt;NA&gt;
+## 2:                                 &lt;NA&gt;
+## 3: 19491ac3-0400-a473-8d6a-25586951ad66
+## 4:                                 &lt;NA&gt;
+## 5: bd703136-4a42-01c0-1616-67a70d7962cb
+## 6: 0627897b-b128-461a-8eba-b84645f9ec0a</code></pre>
+<p>Interviewer Info</p>
+<pre class="r"><code>interview_data &lt;- suso_getINT()
+print(interview_data)</code></pre>
+<pre><code>##                                    sv_id IsLocked            CreationDate
+##                                   &lt;char&gt;   &lt;lgcl&gt;                  &lt;POSc&gt;
+##  1: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.415
+##  2: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.358
+##  3: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.377
+##  4: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.396
+##  5: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.415
+##  6: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.435
+##  7: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.456
+##  8: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.476
+##  9: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.495
+## 10: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.515
+## 11: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.534
+## 12: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.442
+## 13: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.554
+## 14: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-06 12:15:51.306
+## 15: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-06 12:15:51.394
+## 16: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-06 12:15:51.415
+## 17: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-06 12:15:51.434
+## 18: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-06 12:15:51.453
+## 19: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.472
+## 20: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.496
+## 21: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.523
+## 22: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.554
+## 23: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-06-10 18:11:39.583
+## 24: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.262
+## 25: 452530ec-cb13-4c83-bea6-da4a85e27acd    FALSE 2025-07-05 12:54:16.338
+##                                    sv_id IsLocked            CreationDate
+##             DeviceId                               UserId        UserName
+##               &lt;char&gt;                               &lt;char&gt;          &lt;char&gt;
+##  1: 4d6af1722f12d613 25844cfc-6638-4d69-bbd6-65fa21df3a95  yemenhbs_intv1
+##  2:             &lt;NA&gt; 8bb44fa4-98ed-467d-bc5f-0836706c15f1 yemenhbs_intv10
+##  3: 8eefb6f511f5b302 632410b6-0159-4bbe-bf4a-6b91f8401dc2 yemenhbs_intv11
+##  4: 97b7b4570555bc5d 3ff3896d-467a-4e9b-9312-a72429ae0a95 yemenhbs_intv12
+##  5: 4e14937d9922800d 76c1f440-3cc0-4eb5-95c5-d10d88752ac4 yemenhbs_intv13
+##  6: 20ef44ba86e2b11c 43975251-d340-45fc-9bfd-cca60c7bff9c yemenhbs_intv14
+##  7: ddb38466ba7aee02 4365e028-2fe4-4302-a6d0-0b5760c8522b yemenhbs_intv15
+##  8: 03819ccc2dfa5da4 32e7d058-6216-471a-9c07-5c4a31ee8c7e yemenhbs_intv16
+##  9: b1c17fe5fcd3551e a1b08592-054c-4804-8175-5a97104c4476 yemenhbs_intv17
+## 10: e25bcf05fbd3b96e 98c01c0d-7042-429c-98e7-3b71c1e87f91 yemenhbs_intv18
+## 11: 432a81c0d3f76052 68b4c79f-fe64-41f4-9800-c672c870ae55 yemenhbs_intv19
+## 12: a7e63f42ed408281 21abc175-8de2-4cd9-b2c8-44528360ee22  yemenhbs_intv2
+## 13: 1c90fa4da3adde4d d357e575-cede-4efa-8dfc-79a68c093bb2 yemenhbs_intv20
+## 14: 252af34739638fc5 dcf1f570-b65c-4300-bd3e-814cccc9cfb8 yemenhbs_intv21
+## 15: 7978154e726f999a e40b95a8-f582-42da-b3a6-a6e0c5212af8 yemenhbs_intv22
+## 16: 5f564aca9eb09bfd 928fb0a8-4423-4226-8bc8-1a19be7b12eb yemenhbs_intv23
+## 17: 03819ccc2dfa5da4 41a9d6cc-c23a-4f7b-819b-1437fc13ba81 yemenhbs_intv24
+## 18: 737f79ead1773036 c4d3bd8c-ac39-45ab-90c9-e53ff39a6b11 yemenhbs_intv25
+## 19:             &lt;NA&gt; 3a36c286-3b64-4ad1-99ab-35ec19df5697  yemenhbs_intv3
+## 20: 49fba937a3d7d08a 8ddd9f3c-183f-4842-977e-8cc0fde29316  yemenhbs_intv4
+## 21:             &lt;NA&gt; b3a6e784-a4fc-4159-9582-db0d28a004b2  yemenhbs_intv5
+## 22: 1c90fa4da3adde4d 3d32f96b-cf6a-4668-a2a0-16f17c4a6f7d  yemenhbs_intv6
+## 23:             &lt;NA&gt; 9a9dc09f-13bc-43c0-95a9-8cdad409e8f7  yemenhbs_intv7
+## 24:             &lt;NA&gt; f7d4f6b7-c598-4170-ab5b-9c393871f207  yemenhbs_intv8
+## 25:             &lt;NA&gt; 15586f4a-8f2d-411d-b76f-f30fefc2f178  yemenhbs_intv9
+##             DeviceId                               UserId        UserName</code></pre>
+<p>Export Data</p>
+<pre class="r"><code>#Export date = June 1 - July 8, 2025
+data &lt;- suso_export(
+  server      = suso_get_api_key(&quot;susoServer&quot;),
+  apiUser     = suso_get_api_key(&quot;susoUser&quot;),
+  apiPass     = suso_get_api_key(&quot;susoPass&quot;),
+  token       = NULL,
+  workspace   = suso_get_api_key(&quot;workspace&quot;),
+  questID     = questlist[3, QuestionnaireId],
+  version     = 3,
+  from_date   = &quot;2025-07-01&quot;,
+  from_time   = &quot;00:00:00&quot;,
+  to_date     = &quot;2025-07-08&quot;,
+  to_time     = &quot;23:59:59&quot;,
+  workStatus  = c(&quot;All&quot;, &quot;SupervisorAssigned&quot;, &quot;InterviewerAssigned&quot;,
+                  &quot;RejectedBySupervisor&quot;, &quot;Completed&quot;, &quot;ApprovedBySupervisor&quot;,
+                  &quot;RejectedByHeadquarters&quot;, &quot;ApprovedByHeadquarters&quot;),
+  addTranslation        = FALSE,
+  translationLanguage   = NULL,
+  reloadTimeDiff        = 1,
+  inShinyApp            = FALSE,
+  verbose               = FALSE,
+  weight_file           = NULL,
+  process_mapquestions  = TRUE,
+  combineFiles          = FALSE
+)
+
+
+#Export paradata = June 1 - July 8, 2025
+
+paradata &lt;- suso_export_paradata(
+  server = suso_get_api_key(&quot;susoServer&quot;),
+  apiUser = suso_get_api_key(&quot;susoUser&quot;),
+  apiPass = suso_get_api_key(&quot;susoPass&quot;),
+  token = NULL,
+  workspace = suso_get_api_key(&quot;workspace&quot;),
+  questID = questlist[3,QuestionnaireId],
+  version = 3,
+  from_date = &quot;2025-07-01&quot;,
+  from_time = &quot;00:00:00&quot;,
+  to_date = &quot;2025-07-08&quot;,
+  to_time = &quot;23:59:59&quot;,
+  workStatus = c(&quot;All&quot;, &quot;SupervisorAssigned&quot;, &quot;InterviewerAssigned&quot;,
+    &quot;RejectedBySupervisor&quot;, &quot;Completed&quot;, &quot;ApprovedBySupervisor&quot;,
+    &quot;RejectedByHeadquarters&quot;, &quot;ApprovedByHeadquarters&quot;),
+  reloadTimeDiff = 1,
+  inShinyApp = FALSE,
+  multiCore = NULL,
+  onlyActiveEvents = FALSE,
+  asList = FALSE,
+  allResponses = TRUE,
+  gpsVarName = NA,
+  verbose = FALSE,
+  showProgress = FALSE
+)</code></pre>
 <pre><code>## 
-## ── R CMD build ─────────────────────────────────────────────────────────────────</code></pre>
-<pre><code>## WARNING: Rtools is required to build R packages, but is not currently installed.
-## 
-## Please download and install Rtools 4.4 from https://cran.r-project.org/bin/windows/Rtools/.</code></pre>
-<pre><code>##          checking for file &#39;C:\Users\wb569257\AppData\Local\Temp\Rtmpg1gWHw\remotes82c41e454cc3\arthur-shaw-susoapi-019e4f9/DESCRIPTION&#39; ...  ✔  checking for file &#39;C:\Users\wb569257\AppData\Local\Temp\Rtmpg1gWHw\remotes82c41e454cc3\arthur-shaw-susoapi-019e4f9/DESCRIPTION&#39; (849ms)
-##       ─  preparing &#39;susoapi&#39;: (1.4s)
-##    checking DESCRIPTION meta-information ...     checking DESCRIPTION meta-information ...   ✔  checking DESCRIPTION meta-information
-##       ─  checking for LF line-endings in source and make files and shell scripts (724ms)
-##       ─  checking for empty or unneeded directories
-##      Omitted &#39;LazyData&#39; from DESCRIPTION
-##       ─  building &#39;susoapi_0.3.1.tar.gz&#39;
-##      
-## </code></pre>
-<pre><code>## Installing package into &#39;C:/Users/wb569257/OneDrive - WBG/Documents/GitHub/yemen_access/renv/library/windows/R-4.4/x86_64-w64-mingw32&#39;
-## (as &#39;lib&#39; is unspecified)</code></pre>
-<pre><code>## Warning in i.p(...): installation of package
-## &#39;C:/Users/wb569257/AppData/Local/Temp/Rtmpg1gWHw/file82c41959785a/susoapi_0.3.1.tar.gz&#39;
-## had non-zero exit status</code></pre>
-<div id="including-plots" class="section level2">
-<h2>Including Plots</h2>
-<p>You can also embed plots, for example:</p>
-<pre class="r"><code># set_credentials(
-#   server = &quot;yemenhbs2025-demo&quot;,
-#   workspace = &quot;yemenhbs_supv&quot;,
-#   user = &quot;yemenhbs_api&quot;,
-#   password = &quot;yemenHBS2025!&quot;
-#)</code></pre>
-<p>Note that the <code>echo = FALSE</code> parameter was added to the
-code chunk to prevent printing of the R code that generated the
-plot.</p>
-</div>
+## Calculating Response Timings.</code></pre>
+<pre><code>## 
+## Export &amp; Transformation finished.</code></pre>
+<pre class="r"><code># 1. Create separate datasets (main, roster 1 (dwelling), roster 2(household))
+main_dt &lt;- rbindlist(
+  lapply(data$main, function(x) {
+    if (!inherits(x, &quot;sf&quot;)) as.data.table(x) else NULL
+  }),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+dwelling_dt &lt;- rbindlist(
+  lapply(data$R1, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+household_dt &lt;- rbindlist(
+  lapply(data$R2, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+#2. Convert paradata in a single list
+paradata_dt &lt;- rbindlist(paradata, use.names = TRUE,fill = TRUE)</code></pre>
+<p>Check 1: Average Duration of Survey</p>
+<p>This check ensures that each interview lasted a reasonable amount of
+time. We also flag surveys that took less than one minute.</p>
+<pre class="r"><code># Calculate duration per interview
+duration &lt;- paradata_dt[
+  !is.na(dateTime), 
+  .(
+    start_time = min(dateTime, na.rm = TRUE),
+    end_time   = max(dateTime, na.rm = TRUE)
+  ), 
+  by = interview__id
+][, duration_mins := as.numeric(difftime(end_time, start_time, units = &quot;mins&quot;))]
+
+# Compute average duration
+avg_duration &lt;- mean(duration$duration_mins, na.rm = TRUE)
+
+# Print result
+cat(&quot;Average survey duration (in minutes):&quot;, round(avg_duration, 2), &quot;minutes\n&quot;)</code></pre>
+<pre><code>## Average survey duration (in minutes): 44.22 minutes</code></pre>
+<pre class="r"><code>#Create bar plot 
+ggplot(duration, aes(x = reorder(interview__id, duration_mins), y = duration_mins/60)) +
+  geom_col(fill = &quot;steelblue&quot;) +
+  coord_flip() +  # Makes it horizontal for better readability
+  labs(
+    title = &quot;Survey Duration by Interview&quot;,
+    x = &quot;Interview ID&quot;,
+    y = &quot;Duration (Hours)&quot;
+  ) +
+  theme_minimal()</code></pre>
+<p><img role="img" src="listing_hbs_files/figure-html/#Checking duration of survey-1.png" width="672" /></p>
+<pre class="r"><code># Create a flag if survey is less than 2 minute
+duration[, short_survey := duration_mins &lt; 2]
+print(duration)</code></pre>
+<pre><code>##                        interview__id              start_time
+##                               &lt;char&gt;                  &lt;POSc&gt;
+##  1: 0000b77b77024b1fb8952b733941a5e2 2025-07-08 15:01:30.286
+##  2: 0532d99f1311494880d5589194a22abe 2025-07-08 11:43:31.249
+##  3: 089f263a806b4d06bc344c5015cb059b 2025-07-08 14:56:27.507
+##  4: 1882d2be3eb14d738389852c1f6d441b 2025-07-08 11:05:06.835
+##  5: 19b4805009a64111bf38f1b9a11e67cf 2025-07-08 14:46:39.619
+##  6: 1f25c59ec4104dfc8bdf6181122838ba 2025-07-08 14:02:05.861
+##  7: 39195304745545099e20c5c179f49c36 2025-07-08 14:51:04.045
+##  8: 3da03c5d28e14bcdb22c77f5bb9f9be4 2025-07-08 14:12:10.080
+##  9: 5d3d0c155c6f4cd0b58839115feda463 2025-07-08 14:37:39.817
+## 10: 709c14b2f8ca4d34970cdc36a1f50ea7 2025-07-08 15:26:20.667
+## 11: 7f585b3bfeb944ee9a6251681089ef75 2025-07-08 15:13:03.924
+## 12: 80bbd8a681664aa8a4ac24fdabf46488 2025-07-08 15:24:51.493
+## 13: 816733f4cf1a42b6af78253fd6eda02c 2025-07-08 15:06:27.894
+## 14: 9602db2abb714d8abe8894c365a4f820 2025-07-08 14:38:36.875
+## 15: 9ce83d8f455846de9b6c8fd191c8b2f4 2025-07-08 14:58:41.927
+## 16: a22405552a544c088b4e01f39564488a 2025-07-08 15:15:36.740
+## 17: a9b810e12481404a8ab976e865e0faaf 2025-07-08 14:28:32.103
+## 18: b580133e403d4febaebb7b5e3e57054d 2025-07-08 12:54:11.908
+## 19: c2114c03994d4116bcb6a9b1229a01cf 2025-07-08 13:55:45.786
+## 20: cf0966d67e004731a351a84bf8fd31ad 2025-07-08 13:56:06.799
+## 21: d5decde952124bb3b575f514b942ec02 2025-07-08 14:56:10.539
+## 22: d72602033a4a4ee8b2c793f477e419cc 2025-07-08 14:46:40.933
+## 23: d8125c56f4e9402788f9b584f7ae91b8 2025-07-08 11:42:56.924
+## 24: d94619bff85c49458fbdfa820c55d086 2025-07-08 11:11:52.411
+## 25: e61dafc89c2f4aef86d7217b09bc0171 2025-07-08 15:51:50.777
+## 26: fa2b2ac37bbd4b0883f935fae4f36d16 2025-07-08 14:16:33.159
+##                        interview__id              start_time
+##                    end_time duration_mins short_survey
+##                      &lt;POSc&gt;         &lt;num&gt;       &lt;lgcl&gt;
+##  1: 2025-07-08 15:13:21.450     11.852733        FALSE
+##  2: 2025-07-08 14:45:44.823    182.226250        FALSE
+##  3: 2025-07-08 15:11:01.356     14.564150        FALSE
+##  4: 2025-07-08 11:36:46.875     31.667333        FALSE
+##  5: 2025-07-08 15:05:54.663     19.250717        FALSE
+##  6: 2025-07-08 14:11:58.321      9.874333        FALSE
+##  7: 2025-07-08 15:00:29.051      9.416767        FALSE
+##  8: 2025-07-08 14:16:26.250      4.269483        FALSE
+##  9: 2025-07-08 14:52:03.753     14.398917        FALSE
+## 10: 2025-07-08 15:42:46.564     16.431617        FALSE
+## 11: 2025-07-08 15:24:19.842     11.265283        FALSE
+## 12: 2025-07-08 15:30:11.840      5.339100        FALSE
+## 13: 2025-07-08 15:21:54.485     15.443183        FALSE
+## 14: 2025-07-08 14:46:43.654      8.112967        FALSE
+## 15: 2025-07-08 15:06:22.755      7.680467        FALSE
+## 16: 2025-07-08 15:26:16.851     10.668533        FALSE
+## 17: 2025-07-08 14:37:50.987      9.314750        FALSE
+## 18: 2025-07-08 15:59:08.703    184.946583        FALSE
+## 19: 2025-07-08 14:45:32.966     49.786317        FALSE
+## 20: 2025-07-08 14:37:26.013     41.320233        FALSE
+## 21: 2025-07-08 15:15:32.105     19.359433        FALSE
+## 22: 2025-07-08 14:52:02.633      5.361683        FALSE
+## 23: 2025-07-08 14:46:01.920    183.083250        FALSE
+## 24: 2025-07-08 15:39:32.621    267.670167        FALSE
+## 25: 2025-07-08 16:00:04.690      8.231867        FALSE
+## 26: 2025-07-08 14:24:50.179      8.283667        FALSE
+##                    end_time duration_mins short_survey</code></pre>
+<p>Check 2A: Non-missing values for Name/Surname of Head of
+Household</p>
+<pre class="r"><code>household_dt[ , name_missing := is.na(q13)]
+print(household_dt[ , .(interview__id, name_missing)])</code></pre>
+<pre><code>##                        interview__id name_missing
+##                               &lt;char&gt;       &lt;lgcl&gt;
+##  1: 0000b77b77024b1fb8952b733941a5e2        FALSE
+##  2: 0000b77b77024b1fb8952b733941a5e2        FALSE
+##  3: 0000b77b77024b1fb8952b733941a5e2        FALSE
+##  4: 0532d99f1311494880d5589194a22abe        FALSE
+##  5: 0532d99f1311494880d5589194a22abe        FALSE
+##  6: 0532d99f1311494880d5589194a22abe        FALSE
+##  7: 089f263a806b4d06bc344c5015cb059b        FALSE
+##  8: 089f263a806b4d06bc344c5015cb059b        FALSE
+##  9: 1882d2be3eb14d738389852c1f6d441b        FALSE
+## 10: 19b4805009a64111bf38f1b9a11e67cf        FALSE
+## 11: 39195304745545099e20c5c179f49c36        FALSE
+## 12: 3da03c5d28e14bcdb22c77f5bb9f9be4        FALSE
+## 13: 709c14b2f8ca4d34970cdc36a1f50ea7        FALSE
+## 14: 709c14b2f8ca4d34970cdc36a1f50ea7        FALSE
+## 15: 709c14b2f8ca4d34970cdc36a1f50ea7        FALSE
+## 16: 7f585b3bfeb944ee9a6251681089ef75        FALSE
+## 17: 80bbd8a681664aa8a4ac24fdabf46488        FALSE
+## 18: 816733f4cf1a42b6af78253fd6eda02c        FALSE
+## 19: 816733f4cf1a42b6af78253fd6eda02c        FALSE
+## 20: 9602db2abb714d8abe8894c365a4f820        FALSE
+## 21: a22405552a544c088b4e01f39564488a        FALSE
+## 22: a22405552a544c088b4e01f39564488a        FALSE
+## 23: a22405552a544c088b4e01f39564488a        FALSE
+## 24: a9b810e12481404a8ab976e865e0faaf        FALSE
+## 25: c2114c03994d4116bcb6a9b1229a01cf        FALSE
+## 26: c2114c03994d4116bcb6a9b1229a01cf        FALSE
+## 27: cf0966d67e004731a351a84bf8fd31ad        FALSE
+## 28: cf0966d67e004731a351a84bf8fd31ad        FALSE
+## 29: cf0966d67e004731a351a84bf8fd31ad        FALSE
+## 30: d5decde952124bb3b575f514b942ec02        FALSE
+## 31: d8125c56f4e9402788f9b584f7ae91b8        FALSE
+## 32: d8125c56f4e9402788f9b584f7ae91b8        FALSE
+## 33: d8125c56f4e9402788f9b584f7ae91b8        FALSE
+## 34: d8125c56f4e9402788f9b584f7ae91b8        FALSE
+## 35: d94619bff85c49458fbdfa820c55d086        FALSE
+## 36: d94619bff85c49458fbdfa820c55d086        FALSE
+## 37: e61dafc89c2f4aef86d7217b09bc0171        FALSE
+##                        interview__id name_missing</code></pre>
+<pre class="r"><code>name_missing &lt;-  household_dt[, .(interview__id, name_missing)]</code></pre>
+<p>Check 2B: Non-missing values for Phone Number</p>
+<pre class="r"><code># Define valid consent responses
+valid_consent &lt;- c(&quot;Yes, eligible household member present and agreed to participate&quot;)
+
+# Step 1: Create q18_valid — keep q18 only if consent is valid, else NA
+household_dt[ , q18_valid := fifelse(q14 %in% valid_consent, q18, NA_character_) ]
+
+# Step 2: Clean q18_valid — remove whitespace
+household_dt[ , q18_clean := gsub(&quot;\\s+&quot;, &quot;&quot;, q18_valid) ]
+
+# Step 3: Convert to numeric (for later checks)
+household_dt[ , q18_num := suppressWarnings(as.numeric(q18_clean)) ]
+
+# Step 4: Function to check if phone is a repeated digit (e.g., &quot;000&quot;, &quot;777&quot;)
+is_repeated_digit &lt;- function(x) {
+  nchar(x) &gt; 0 &amp; grepl(&quot;^([0-9])\\1+$&quot;, x)
+}
+
+# Step 5: Flag phone_missing if:
+# - consent given AND
+# - q18 is NA, empty, 0, or made of repeated digits
+household_dt[ , phone_missing := NA ]  # initialize
+
+household_dt[q14 %in% valid_consent, phone_missing := 
+  is.na(q18_num) |
+  q18_clean == &quot;&quot; |
+  is_repeated_digit(q18_clean)
+]
+
+phone_missing &lt;- household_dt[, .(interview__id, phone_missing)]
+
+print(phone_missing)</code></pre>
+<pre><code>##                        interview__id phone_missing
+##                               &lt;char&gt;        &lt;lgcl&gt;
+##  1: 0000b77b77024b1fb8952b733941a5e2         FALSE
+##  2: 0000b77b77024b1fb8952b733941a5e2         FALSE
+##  3: 0000b77b77024b1fb8952b733941a5e2         FALSE
+##  4: 0532d99f1311494880d5589194a22abe            NA
+##  5: 0532d99f1311494880d5589194a22abe            NA
+##  6: 0532d99f1311494880d5589194a22abe            NA
+##  7: 089f263a806b4d06bc344c5015cb059b         FALSE
+##  8: 089f263a806b4d06bc344c5015cb059b         FALSE
+##  9: 1882d2be3eb14d738389852c1f6d441b          TRUE
+## 10: 19b4805009a64111bf38f1b9a11e67cf            NA
+## 11: 39195304745545099e20c5c179f49c36         FALSE
+## 12: 3da03c5d28e14bcdb22c77f5bb9f9be4         FALSE
+## 13: 709c14b2f8ca4d34970cdc36a1f50ea7          TRUE
+## 14: 709c14b2f8ca4d34970cdc36a1f50ea7          TRUE
+## 15: 709c14b2f8ca4d34970cdc36a1f50ea7          TRUE
+## 16: 7f585b3bfeb944ee9a6251681089ef75         FALSE
+## 17: 80bbd8a681664aa8a4ac24fdabf46488          TRUE
+## 18: 816733f4cf1a42b6af78253fd6eda02c          TRUE
+## 19: 816733f4cf1a42b6af78253fd6eda02c          TRUE
+## 20: 9602db2abb714d8abe8894c365a4f820         FALSE
+## 21: a22405552a544c088b4e01f39564488a         FALSE
+## 22: a22405552a544c088b4e01f39564488a          TRUE
+## 23: a22405552a544c088b4e01f39564488a          TRUE
+## 24: a9b810e12481404a8ab976e865e0faaf         FALSE
+## 25: c2114c03994d4116bcb6a9b1229a01cf         FALSE
+## 26: c2114c03994d4116bcb6a9b1229a01cf         FALSE
+## 27: cf0966d67e004731a351a84bf8fd31ad         FALSE
+## 28: cf0966d67e004731a351a84bf8fd31ad            NA
+## 29: cf0966d67e004731a351a84bf8fd31ad            NA
+## 30: d5decde952124bb3b575f514b942ec02            NA
+## 31: d8125c56f4e9402788f9b584f7ae91b8            NA
+## 32: d8125c56f4e9402788f9b584f7ae91b8            NA
+## 33: d8125c56f4e9402788f9b584f7ae91b8          TRUE
+## 34: d8125c56f4e9402788f9b584f7ae91b8            NA
+## 35: d94619bff85c49458fbdfa820c55d086          TRUE
+## 36: d94619bff85c49458fbdfa820c55d086            NA
+## 37: e61dafc89c2f4aef86d7217b09bc0171            NA
+##                        interview__id phone_missing</code></pre>
+<p>Check 3: Non missing values for Household Size</p>
+<pre class="r"><code># Define valid consent responses
+valid_consent &lt;- c(&quot;Yes, eligible household member present and agreed to participate&quot;)
+
+# Flag missing household size only for valid consent cases
+household_dt[ , hh_size_missing := NA ]  # initialize
+
+household_dt[q14 %in% valid_consent, hh_size_missing := is.na(q15)]
+
+hhsize_missing &lt;-  household_dt[, .(interview__id, hh_size_missing)]
+
+print(hhsize_missing)</code></pre>
+<pre><code>##                        interview__id hh_size_missing
+##                               &lt;char&gt;          &lt;lgcl&gt;
+##  1: 0000b77b77024b1fb8952b733941a5e2           FALSE
+##  2: 0000b77b77024b1fb8952b733941a5e2           FALSE
+##  3: 0000b77b77024b1fb8952b733941a5e2           FALSE
+##  4: 0532d99f1311494880d5589194a22abe              NA
+##  5: 0532d99f1311494880d5589194a22abe              NA
+##  6: 0532d99f1311494880d5589194a22abe              NA
+##  7: 089f263a806b4d06bc344c5015cb059b           FALSE
+##  8: 089f263a806b4d06bc344c5015cb059b           FALSE
+##  9: 1882d2be3eb14d738389852c1f6d441b           FALSE
+## 10: 19b4805009a64111bf38f1b9a11e67cf              NA
+## 11: 39195304745545099e20c5c179f49c36           FALSE
+## 12: 3da03c5d28e14bcdb22c77f5bb9f9be4           FALSE
+## 13: 709c14b2f8ca4d34970cdc36a1f50ea7           FALSE
+## 14: 709c14b2f8ca4d34970cdc36a1f50ea7           FALSE
+## 15: 709c14b2f8ca4d34970cdc36a1f50ea7           FALSE
+## 16: 7f585b3bfeb944ee9a6251681089ef75           FALSE
+## 17: 80bbd8a681664aa8a4ac24fdabf46488           FALSE
+## 18: 816733f4cf1a42b6af78253fd6eda02c           FALSE
+## 19: 816733f4cf1a42b6af78253fd6eda02c           FALSE
+## 20: 9602db2abb714d8abe8894c365a4f820           FALSE
+## 21: a22405552a544c088b4e01f39564488a           FALSE
+## 22: a22405552a544c088b4e01f39564488a           FALSE
+## 23: a22405552a544c088b4e01f39564488a           FALSE
+## 24: a9b810e12481404a8ab976e865e0faaf           FALSE
+## 25: c2114c03994d4116bcb6a9b1229a01cf           FALSE
+## 26: c2114c03994d4116bcb6a9b1229a01cf           FALSE
+## 27: cf0966d67e004731a351a84bf8fd31ad           FALSE
+## 28: cf0966d67e004731a351a84bf8fd31ad              NA
+## 29: cf0966d67e004731a351a84bf8fd31ad              NA
+## 30: d5decde952124bb3b575f514b942ec02              NA
+## 31: d8125c56f4e9402788f9b584f7ae91b8              NA
+## 32: d8125c56f4e9402788f9b584f7ae91b8              NA
+## 33: d8125c56f4e9402788f9b584f7ae91b8           FALSE
+## 34: d8125c56f4e9402788f9b584f7ae91b8              NA
+## 35: d94619bff85c49458fbdfa820c55d086           FALSE
+## 36: d94619bff85c49458fbdfa820c55d086              NA
+## 37: e61dafc89c2f4aef86d7217b09bc0171              NA
+##                        interview__id hh_size_missing</code></pre>
+<p>Check 4: Check the population count against WorldPop</p>
+<pre class="r"><code># Step 1. Load WorldPop Data
+worldpop_data &lt;- raster(&quot;C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets/yem_pop_2025_CN_100m_R2024B_v1.tif&quot;) # NOTE: Change the path below based on your local directory
+
+# Step 2. Load Enumeration Area Shapefiles
+shp_path &lt;- &quot;C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets/shapefiles_hbs&quot;
+
+# List and read all shapefiles
+shp_files &lt;- list.files(shp_path, pattern = &quot;\\.shp$&quot;, full.names = TRUE)
+shp_list &lt;- lapply(shp_files, st_read)</code></pre>
+<pre><code>## Reading layer `seg_Lat15420Lon5500&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15420Lon5500.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03223 ymin: 12.76811 xmax: 45.03307 ymax: 12.76894
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15424Lon5501&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15424Lon5501.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03308 ymin: 12.77142 xmax: 45.03392 ymax: 12.77225
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15427Lon5498&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15427Lon5498.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03055 ymin: 12.7739 xmax: 45.03139 ymax: 12.77473
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15429Lon5504&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15429Lon5504.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03561 ymin: 12.77556 xmax: 45.03645 ymax: 12.77639
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15431Lon5513&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15431Lon5513.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.0432 ymin: 12.77721 xmax: 45.04404 ymax: 12.77804
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15432Lon5500&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15432Lon5500.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03223 ymin: 12.77804 xmax: 45.03308 ymax: 12.77887
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15434Lon5502&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15434Lon5502.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03392 ymin: 12.7797 xmax: 45.03476 ymax: 12.78053
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15437Lon5509&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15437Lon5509.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03982 ymin: 12.78218 xmax: 45.04067 ymax: 12.78301
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15439Lon5506&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15439Lon5506.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.03729 ymin: 12.78384 xmax: 45.03814 ymax: 12.78466
+## Geodetic CRS:  WGS 84
+## Reading layer `seg_Lat15441Lon5496&#39; from data source 
+##   `C:\Users\wb569257\OneDrive - WBG\Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets\shapefiles_hbs\seg_Lat15441Lon5496.shp&#39; 
+##   using driver `ESRI Shapefile&#39;
+## Simple feature collection with 4 features and 2 fields
+## Geometry type: POLYGON
+## Dimension:     XY
+## Bounding box:  xmin: 45.02886 ymin: 12.78549 xmax: 45.0297 ymax: 12.78632
+## Geodetic CRS:  WGS 84</code></pre>
+<pre class="r"><code># Optionally, name each shapefile by filename (without extension)
+names(shp_list) &lt;- tools::file_path_sans_ext(basename(shp_files))
+
+# Combine all shapefiles into a single sf object
+enum_area &lt;- do.call(rbind, shp_list)
+
+
+# Step 3. Combine main dt and household dt
+combined_dt &lt;- merge(main_dt, household_dt, by = c(&quot;interview__id&quot;,&quot;interview__key&quot;), all = TRUE)
+
+# Step 4. Replace CID with GRIDID
+combined_dt[ , cover04 := as.character(cover04)]
+combined_dt[cover04 == &quot;1028&quot;, cover04 := &quot;seg_Lat15429Lon5504&quot;]
+
+# Step 5. Aggregate total households per grid cell (cover04 = CID) and sub-cell (cover05 = label)
+pop_by_grid &lt;- combined_dt[ , .(
+  survey_pop_quadrant    = sum(q15, na.rm = TRUE),
+  interview_ids = list(unique(interview__id))
+), by = .(CID = cover04, label = cover05)]
+
+# Remove non-digit characters from label and convert to character
+pop_by_grid[ , label := gsub(&quot;\\D+&quot;, &quot;&quot;, label)]
+pop_by_grid[ , label := as.character(label)]
+
+
+# Step 6. Extract WorldPop Population by Enumeration Area
+enum_area &lt;- st_as_sf(enum_area)  # restore sf class
+
+
+# Calculate WorldPop raster sum for each enumeration shape
+enum_area$worldpop_pop &lt;- exact_extract(worldpop_data, enum_area, &#39;sum&#39;)</code></pre>
+<pre><code>##   |                                                                              |                                                                      |   0%  |                                                                              |==                                                                    |   2%  |                                                                              |====                                                                  |   5%  |                                                                              |=====                                                                 |   8%  |                                                                              |=======                                                               |  10%  |                                                                              |=========                                                             |  12%  |                                                                              |==========                                                            |  15%  |                                                                              |============                                                          |  18%  |                                                                              |==============                                                        |  20%  |                                                                              |================                                                      |  22%  |                                                                              |==================                                                    |  25%  |                                                                              |===================                                                   |  28%  |                                                                              |=====================                                                 |  30%  |                                                                              |=======================                                               |  32%  |                                                                              |========================                                              |  35%  |                                                                              |==========================                                            |  38%  |                                                                              |============================                                          |  40%  |                                                                              |==============================                                        |  42%  |                                                                              |================================                                      |  45%  |                                                                              |=================================                                     |  48%  |                                                                              |===================================                                   |  50%  |                                                                              |=====================================                                 |  52%  |                                                                              |======================================                                |  55%  |                                                                              |========================================                              |  58%  |                                                                              |==========================================                            |  60%  |                                                                              |============================================                          |  62%  |                                                                              |==============================================                        |  65%  |                                                                              |===============================================                       |  68%  |                                                                              |=================================================                     |  70%  |                                                                              |===================================================                   |  72%  |                                                                              |====================================================                  |  75%  |                                                                              |======================================================                |  78%  |                                                                              |========================================================              |  80%  |                                                                              |==========================================================            |  82%  |                                                                              |============================================================          |  85%  |                                                                              |=============================================================         |  88%  |                                                                              |===============================================================       |  90%  |                                                                              |=================================================================     |  92%  |                                                                              |==================================================================    |  95%  |                                                                              |====================================================================  |  98%  |                                                                              |======================================================================| 100%</code></pre>
+<pre class="r"><code># Convert to data.table
+setDT(enum_area)
+
+# Ensure label column is character in both for join
+enum_area[ , label := as.character(label)]
+
+
+# Step 7. Merge Survey Population with WorldPop Population
+
+# Left join: bring survey population into enum_area
+comparison_df &lt;- pop_by_grid[enum_area, on = .(CID, label)]
+
+# View result
+print(comparison_df)</code></pre>
+<pre><code>##                     CID  label survey_pop_quadrant
+##                  &lt;char&gt; &lt;char&gt;               &lt;int&gt;
+##  1: seg_Lat15420Lon5500      1                  NA
+##  2: seg_Lat15420Lon5500      2                  NA
+##  3: seg_Lat15420Lon5500      3                  NA
+##  4: seg_Lat15420Lon5500      4                  NA
+##  5: seg_Lat15424Lon5501      1                  NA
+##  6: seg_Lat15424Lon5501      2                  NA
+##  7: seg_Lat15424Lon5501      3                  NA
+##  8: seg_Lat15424Lon5501      4                  NA
+##  9: seg_Lat15427Lon5498      1                  NA
+## 10: seg_Lat15427Lon5498      2                  NA
+## 11: seg_Lat15427Lon5498      3                  NA
+## 12: seg_Lat15427Lon5498      4                  NA
+## 13: seg_Lat15429Lon5504      1                  41
+## 14: seg_Lat15429Lon5504      2                  30
+## 15: seg_Lat15429Lon5504      3                  58
+## 16: seg_Lat15429Lon5504      4                  27
+## 17: seg_Lat15431Lon5513      1                  NA
+## 18: seg_Lat15431Lon5513      2                  NA
+## 19: seg_Lat15431Lon5513      3                  NA
+## 20: seg_Lat15431Lon5513      4                  NA
+## 21: seg_Lat15432Lon5500      1                  NA
+## 22: seg_Lat15432Lon5500      2                  NA
+## 23: seg_Lat15432Lon5500      3                  NA
+## 24: seg_Lat15432Lon5500      4                  NA
+## 25: seg_Lat15434Lon5502      1                  NA
+## 26: seg_Lat15434Lon5502      2                  NA
+## 27: seg_Lat15434Lon5502      3                  NA
+## 28: seg_Lat15434Lon5502      4                  NA
+## 29: seg_Lat15437Lon5509      1                  NA
+## 30: seg_Lat15437Lon5509      2                  NA
+## 31: seg_Lat15437Lon5509      3                  NA
+## 32: seg_Lat15437Lon5509      4                  NA
+## 33: seg_Lat15439Lon5506      1                  NA
+## 34: seg_Lat15439Lon5506      2                  NA
+## 35: seg_Lat15439Lon5506      3                  NA
+## 36: seg_Lat15439Lon5506      4                  NA
+## 37: seg_Lat15441Lon5496      1                  NA
+## 38: seg_Lat15441Lon5496      2                  NA
+## 39: seg_Lat15441Lon5496      3                  NA
+## 40: seg_Lat15441Lon5496      4                  NA
+##                     CID  label survey_pop_quadrant
+##                                                                                                                                                                                                 interview_ids
+##                                                                                                                                                                                                        &lt;list&gt;
+##  1:                                                                                                                                                                                                    [NULL]
+##  2:                                                                                                                                                                                                    [NULL]
+##  3:                                                                                                                                                                                                    [NULL]
+##  4:                                                                                                                                                                                                    [NULL]
+##  5:                                                                                                                                                                                                    [NULL]
+##  6:                                                                                                                                                                                                    [NULL]
+##  7:                                                                                                                                                                                                    [NULL]
+##  8:                                                                                                                                                                                                    [NULL]
+##  9:                                                                                                                                                                                                    [NULL]
+## 10:                                                                                                                                                                                                    [NULL]
+## 11:                                                                                                                                                                                                    [NULL]
+## 12:                                                                                                                                                                                                    [NULL]
+## 13: 0000b77b77024b1fb8952b733941a5e2,1f25c59ec4104dfc8bdf6181122838ba,39195304745545099e20c5c179f49c36,3da03c5d28e14bcdb22c77f5bb9f9be4,9602db2abb714d8abe8894c365a4f820,a9b810e12481404a8ab976e865e0faaf,...
+## 14: 1882d2be3eb14d738389852c1f6d441b,5d3d0c155c6f4cd0b58839115feda463,80bbd8a681664aa8a4ac24fdabf46488,816733f4cf1a42b6af78253fd6eda02c,9ce83d8f455846de9b6c8fd191c8b2f4,b580133e403d4febaebb7b5e3e57054d,...
+## 15: 0532d99f1311494880d5589194a22abe,19b4805009a64111bf38f1b9a11e67cf,709c14b2f8ca4d34970cdc36a1f50ea7,a22405552a544c088b4e01f39564488a,d5decde952124bb3b575f514b942ec02,d8125c56f4e9402788f9b584f7ae91b8,...
+## 16:                                      089f263a806b4d06bc344c5015cb059b,7f585b3bfeb944ee9a6251681089ef75,c2114c03994d4116bcb6a9b1229a01cf,d72602033a4a4ee8b2c793f477e419cc,d94619bff85c49458fbdfa820c55d086
+## 17:                                                                                                                                                                                                    [NULL]
+## 18:                                                                                                                                                                                                    [NULL]
+## 19:                                                                                                                                                                                                    [NULL]
+## 20:                                                                                                                                                                                                    [NULL]
+## 21:                                                                                                                                                                                                    [NULL]
+## 22:                                                                                                                                                                                                    [NULL]
+## 23:                                                                                                                                                                                                    [NULL]
+## 24:                                                                                                                                                                                                    [NULL]
+## 25:                                                                                                                                                                                                    [NULL]
+## 26:                                                                                                                                                                                                    [NULL]
+## 27:                                                                                                                                                                                                    [NULL]
+## 28:                                                                                                                                                                                                    [NULL]
+## 29:                                                                                                                                                                                                    [NULL]
+## 30:                                                                                                                                                                                                    [NULL]
+## 31:                                                                                                                                                                                                    [NULL]
+## 32:                                                                                                                                                                                                    [NULL]
+## 33:                                                                                                                                                                                                    [NULL]
+## 34:                                                                                                                                                                                                    [NULL]
+## 35:                                                                                                                                                                                                    [NULL]
+## 36:                                                                                                                                                                                                    [NULL]
+## 37:                                                                                                                                                                                                    [NULL]
+## 38:                                                                                                                                                                                                    [NULL]
+## 39:                                                                                                                                                                                                    [NULL]
+## 40:                                                                                                                                                                                                    [NULL]
+##                                                                                                                                                                                                 interview_ids
+##                           geometry worldpop_pop
+##                      &lt;sfc_POLYGON&gt;        &lt;num&gt;
+##  1: POLYGON ((45.03223 12.76811...    15.896278
+##  2: POLYGON ((45.03265 12.76811...    26.804272
+##  3: POLYGON ((45.03223 12.76852...    22.512283
+##  4: POLYGON ((45.03265 12.76852...    32.953083
+##  5: POLYGON ((45.03308 12.77142...   144.973862
+##  6: POLYGON ((45.0335 12.77142,...   159.781342
+##  7: POLYGON ((45.03308 12.77183...   144.390472
+##  8: POLYGON ((45.0335 12.77183,...   160.438766
+##  9: POLYGON ((45.03055 12.7739,...    47.657032
+## 10: POLYGON ((45.03097 12.7739,...    52.890469
+## 11: POLYGON ((45.03055 12.77432...   102.392616
+## 12: POLYGON ((45.03097 12.77432...   103.020988
+## 13: POLYGON ((45.03561 12.77556...   171.356110
+## 14: POLYGON ((45.03603 12.77556...   174.888626
+## 15: POLYGON ((45.03561 12.77597...   166.943207
+## 16: POLYGON ((45.03603 12.77597...   172.805222
+## 17: POLYGON ((45.0432 12.77721,...   134.977829
+## 18: POLYGON ((45.04362 12.77721...   135.244370
+## 19: POLYGON ((45.0432 12.77763,...   133.522156
+## 20: POLYGON ((45.04362 12.77763...   132.635101
+## 21: POLYGON ((45.03223 12.77804...   147.914581
+## 22: POLYGON ((45.03265 12.77804...   149.637161
+## 23: POLYGON ((45.03223 12.77846...   145.474991
+## 24: POLYGON ((45.03265 12.77846...   151.645828
+## 25: POLYGON ((45.03392 12.7797,...   149.147293
+## 26: POLYGON ((45.03434 12.7797,...   152.154984
+## 27: POLYGON ((45.03392 12.78011...   141.778809
+## 28: POLYGON ((45.03434 12.78011...   141.829834
+## 29: POLYGON ((45.03982 12.78218...    78.039330
+## 30: POLYGON ((45.04025 12.78218...    73.939377
+## 31: POLYGON ((45.03982 12.78259...    89.826538
+## 32: POLYGON ((45.04025 12.78259...    77.838455
+## 33: POLYGON ((45.03729 12.78384...    79.404030
+## 34: POLYGON ((45.03772 12.78384...    54.261818
+## 35: POLYGON ((45.03729 12.78425...     9.040593
+## 36: POLYGON ((45.03772 12.78425...     5.871457
+## 37: POLYGON ((45.02886 12.78549...   152.617676
+## 38: POLYGON ((45.02928 12.78549...   155.654495
+## 39: POLYGON ((45.02886 12.78591...   145.169998
+## 40: POLYGON ((45.02928 12.78591...   142.586700
+##                           geometry worldpop_pop</code></pre>
+<p>Export as Excel sheet NAs are present where there is no consent</p>
+<pre class="r"><code># Start with duration
+qc_summary &lt;- duration[, .(interview__id, duration_mins, short_survey)]
+
+# Merge other checks
+qc_summary &lt;- merge(qc_summary, name_missing, by = &quot;interview__id&quot;, all = TRUE)
+qc_summary &lt;- merge(qc_summary, phone_missing, by = &quot;interview__id&quot;, all = TRUE, allow.cartesian = T)
+qc_summary &lt;- merge(qc_summary, hhsize_missing, by = &quot;interview__id&quot;, all = TRUE,allow.cartesian = T)
+
+# View summary
+print(qc_summary)</code></pre>
+<pre><code>## Key: &lt;interview__id&gt;
+##                         interview__id duration_mins short_survey name_missing
+##                                &lt;char&gt;         &lt;num&gt;       &lt;lgcl&gt;       &lt;lgcl&gt;
+##   1: 0000b77b77024b1fb8952b733941a5e2     11.852733        FALSE        FALSE
+##   2: 0000b77b77024b1fb8952b733941a5e2     11.852733        FALSE        FALSE
+##   3: 0000b77b77024b1fb8952b733941a5e2     11.852733        FALSE        FALSE
+##   4: 0000b77b77024b1fb8952b733941a5e2     11.852733        FALSE        FALSE
+##   5: 0000b77b77024b1fb8952b733941a5e2     11.852733        FALSE        FALSE
+##  ---                                                                         
+## 243: d94619bff85c49458fbdfa820c55d086    267.670167        FALSE        FALSE
+## 244: d94619bff85c49458fbdfa820c55d086    267.670167        FALSE        FALSE
+## 245: d94619bff85c49458fbdfa820c55d086    267.670167        FALSE        FALSE
+## 246: e61dafc89c2f4aef86d7217b09bc0171      8.231867        FALSE        FALSE
+## 247: fa2b2ac37bbd4b0883f935fae4f36d16      8.283667        FALSE           NA
+##      phone_missing hh_size_missing
+##             &lt;lgcl&gt;          &lt;lgcl&gt;
+##   1:         FALSE           FALSE
+##   2:         FALSE           FALSE
+##   3:         FALSE           FALSE
+##   4:         FALSE           FALSE
+##   5:         FALSE           FALSE
+##  ---                              
+## 243:          TRUE              NA
+## 244:            NA           FALSE
+## 245:            NA              NA
+## 246:            NA              NA
+## 247:            NA              NA</code></pre>
+<pre class="r"><code>#Export to your directory
+timestamp &lt;- format(Sys.time(), &quot;%Y-%m-%d_%H-%M&quot;)
+filename &lt;- paste0(&quot;survey_qc_summary_&quot;, timestamp, &quot;.csv&quot;)
+output_dir &lt;- &quot;C:/Users/wb569257/OneDrive - WBG/Alia Jane Aghajanian&#39;s files - 150_icl_access_to_markets/&quot; #CHANGE TO SPECIFIC DIRECTORY IN YOUR COMPUTER
+fwrite(qc_summary, file.path(output_dir, filename))</code></pre>
 
 
 

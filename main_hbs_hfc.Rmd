@@ -1,0 +1,250 @@
+---
+title: "Survey Data Quality Checks - Main Household Questionnaire"
+output: html_document
+date: "2025-07-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+Installing and Loading Packages
+
+```{r}
+#install.packages("devtools")
+#devtools::install_github("michael-cw/SurveySolutionsAPIv2", build_vignettes = T)
+#install.packages("ggplot2")
+#install.packages("data.table")
+#install.packages("raster")
+#install.packages("sp")
+#install.packages("leaflet")
+#install.packages("rnaturalearth")
+#install.packages("rnaturalearthdata")
+#install.packages("sf")
+#install.packages("exactextractr")
+#install.packages("terra")
+
+#load packages
+library(SurveySolutionsAPIv2)
+library(ggplot2)
+library(data.table)
+library(sp)
+library(raster)
+library(leaflet)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(terra)
+library(exactextractr)
+```
+
+
+
+Connecting to Survey Solutions
+
+Before proceeding, make sure you've created an API username and
+```{r}
+# Before setting key, make sure to generate a key in the server
+suso_clear_keys()
+suso_set_key("https://yemenhbs2025-2-demo.mysurvey.solutions/", "api_cb", "yemenHBS2025!", "primary")
+suso_keys()
+#> $suso
+#> $suso$susoServer
+#> [1] "https://xxx.mysurvey.solutions"
+#> 
+#> $suso$susoUser
+#> [1] "xxxxxx"
+#> 
+#> $suso$susoPass
+#> [1] "xxxxxxx"
+#> 
+#> $suso$workspace
+#> [1] "test"
+#> 
+#> 
+#> attr(,"class")
+#> [1] "suso_api"
+
+```
+
+
+#View Workspaces and Users
+
+```{r # Checking workspace}
+ws <- suso_getWorkspace()
+print(head(ws))
+
+sv <- suso_getSV(workspace = "primary")
+print(head(sv))
+
+```
+
+
+Get Questionnaire List 
+
+```{r # Checking questionnaire list in the workspace}
+questlist <- suso_getQuestDetails()
+print(questlist)
+
+questlist[4, QuestionnaireId]
+
+```
+
+
+Interviewer Info
+
+```{r # Checking interviewer info}
+interview_data <- suso_getINT()
+print(interview_data)
+```
+
+
+
+
+
+``` {r}
+
+#Export date = June 1 - July 8, 2025
+data <- suso_export(
+  server      = suso_get_api_key("susoServer"),
+  apiUser     = suso_get_api_key("susoUser"),
+  apiPass     = suso_get_api_key("susoPass"),
+  token       = NULL,
+  workspace   = suso_get_api_key("workspace"),
+  questID     = questlist[4, QuestionnaireId],
+  version     = 1,
+  from_date   = "2025-07-01",
+  from_time   = "00:00:00",
+  to_date     = "2025-07-30",
+  to_time     = "23:59:59",
+  workStatus  = c("All", "SupervisorAssigned", "InterviewerAssigned",
+    "RejectedBySupervisor", "Completed", "ApprovedBySupervisor",
+    "RejectedByHeadquarters", "ApprovedByHeadquarters"),
+  addTranslation        = FALSE,
+  translationLanguage   = NULL,
+  reloadTimeDiff        = 1,
+  inShinyApp            = FALSE,
+  verbose               = FALSE,
+  weight_file           = NULL,
+  process_mapquestions  = TRUE,
+  combineFiles          = FALSE
+)
+
+
+#Export paradata = June 1 - July 8, 2025
+
+paradata <- suso_export_paradata(
+  server = suso_get_api_key("susoServer"),
+  apiUser = suso_get_api_key("susoUser"),
+  apiPass = suso_get_api_key("susoPass"),
+  token = NULL,
+  workspace = suso_get_api_key("workspace"),
+  questID = questlist[3,QuestionnaireId],
+  version = 1,
+  from_date = "2025-07-01",
+  from_time = "00:00:00",
+  to_date = "2025-07-08",
+  to_time = "23:59:59",
+  workStatus = c("All", "SupervisorAssigned", "InterviewerAssigned",
+    "RejectedBySupervisor", "Completed", "ApprovedBySupervisor",
+    "RejectedByHeadquarters", "ApprovedByHeadquarters"),
+  reloadTimeDiff = 1,
+  inShinyApp = FALSE,
+  multiCore = NULL,
+  onlyActiveEvents = FALSE,
+  asList = FALSE,
+  allResponses = TRUE,
+  gpsVarName = NA,
+  verbose = FALSE,
+  showProgress = FALSE
+)
+
+
+
+
+# 1. Create separate datasets (main, roster 1 (dwelling), roster 2(household))
+main_dt <- rbindlist(
+  lapply(data$main, function(x) {
+    if (!inherits(x, "sf")) as.data.table(x) else NULL
+  }),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+dwelling_dt <- rbindlist(
+  lapply(data$R1, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+household_dt <- rbindlist(
+  lapply(data$R2, as.data.table),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+#2. Convert paradata in a single list
+paradata_dt <- rbindlist(paradata, use.names = TRUE,fill = TRUE)
+
+
+
+```
+
+
+
+
+
+This R Markdown document connects to the Survey Solutions API, and runs quality checks for the main HBS Questionnaire. This script consists of three sets of checks
+
+1.COMPLETENESS CHECKS
+a. Checking for missing unique IDs
+b. Duplicates in unique IDs
+c. Number of household members should match the number of rosters answered
+d. Check if the names of the household members is repeated
+e. Check name, age information is complete
+
+
+```{r cars}
+summary(cars)
+```
+
+2.DISTRIBUTION CHECKS
+a. Check the quantity of food items that deviate significantly (2 SD) from the total average across all surveys 
+b. Check the prices that deviate significantly (2 SD) from the total average across all surveys
+c. Check the quantity of durables that deviate significantly (2 SD) from the total average across all surveys
+d. Check the prices that deviate significantly (2 SD) from the total average across all surveys
+e. Check labor income and non- labor income outliers
+
+
+```{r cars}
+summary(cars)
+```
+
+3.CONSISTENCY CHECKS
+a. Check if the consumption module is answered by an adult or child
+
+```{r cars}
+summary(cars)
+```
+
+
+4.SURVEYOR PERFORMANCE CHECKS
+a. Check the percentage of “don’t know” and “refuse to answer”
+b. Check the average number of household members filled for each surveyor
+c. Number of durables by surveyor
+d. Number of food groups by surveyor
+e. Number of food items by surveyor
+f. Number of non-food items (number of Nos/ amount missing) – compared to the total average
+g. Check number of surveys completed by enumerator
+h. Check average duration of survey (removing idle time)
+i. Check the start/end time of surveys (should not be unusually early/late)
+j. Check if the interview was submitted within the coordinates of the assigned household based on the sampling 
+k. Time that they start and time of GPS reporting
+l. Time between question of GPS and right after GPS
+
+```{r cars}
+summary(cars)
+```
+
+
